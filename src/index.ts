@@ -85,7 +85,7 @@ export default {
             href="https://unpkg.com/sakura.css/css/sakura.css"
             type="text/css">
           <script>
-            setInterval(()=>window.location.reload(), 5000)
+            setInterval(()=>window.location.reload(), 60000)
           </script>
           <table>
             ${(await pings).keys.map(p => `
