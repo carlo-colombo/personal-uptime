@@ -74,7 +74,34 @@ export default {
     }
 
     if (pathname.startsWith("/list")) {
+      const accept = request.headers.get('Accept')
       const pings = PINGS.list()
+
+      if (accept?.includes("text/html")) {
+        return new Response(`
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link
+            rel="stylesheet"
+            href="https://unpkg.com/sakura.css/css/sakura.css"
+            type="text/css">
+          <script>
+            setInterval(()=>window.location.reload(), 5000)
+          </script>
+          <table>
+            ${(await pings).keys.map(p => `
+              <tr>
+                <td>${p.metadata.alarm ? '🛎': ' '}</td>
+                <td>${p.name}</td>
+                <td>${p.metadata.date}</td>
+              </tr>`).join('')}
+          </table>
+          `, {
+          headers: {
+            'content-type': 'text/html;charset=UTF-8',
+          },
+        })
+      }
+
 
       return Response.json(await pings)
     }
