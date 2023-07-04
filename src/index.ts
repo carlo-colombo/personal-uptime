@@ -8,14 +8,12 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { DateTime, DurationLike } from 'luxon'
-
 export interface Env {
   CHAT_ID: string,
-  INTERVAL: DurationLike,
-  MESSAGE_TIMEOUT: DurationLike,
-  PINGS: KVNamespace,
   TELEGRAM_TOKEN: string,
+  DB: D1Database,
+  INTERVAL: string,
+  ALARM_TIMEOUT: string
 }
 
 interface Metadata {
@@ -23,16 +21,8 @@ interface Metadata {
   alarm?: number
 }
 
-const isOutdated = (env: Env) => ({ timestamp }: Metadata, now: DateTime) => {
-  return DateTime.fromMillis(timestamp) < now.minus(env.INTERVAL)
-}
-
-const shouldTrigger = (env: Env) => ({ alarm }: Metadata, now: DateTime) => {
-  if (!alarm) return true
-  return DateTime.fromMillis(alarm) < now.minus(env.MESSAGE_TIMEOUT)
-}
-
 async function sendMessage(env: Env, text: string): Promise<void> {
+  console.log('sendMessage', text)
   const baseURL = new URL(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`)
   const u = Object.assign(baseURL, {
     search: new URLSearchParams({
@@ -46,6 +36,12 @@ async function sendMessage(env: Env, text: string): Promise<void> {
   return
 }
 
+interface Host {
+  name: string,
+  pinged: string,
+  alarmed?: string
+}
+
 export default {
   async fetch(
     request: Request,
@@ -53,7 +49,6 @@ export default {
     ctx: ExecutionContext
   ): Promise<Response> {
     const { pathname } = new URL(request.url);
-    const { PINGS } = env
 
     if (pathname.startsWith("/ping")) {
       const origin = request.headers.get("Origin")
@@ -62,20 +57,39 @@ export default {
         return new Response("Missing origin header")
       }
 
-      const t = new Date()
-      const prev = await PINGS.getWithMetadata<Metadata>(origin)
-      if (prev != null && prev.metadata?.alarm) {
-        await sendMessage(env, `${origin} recovered`)
+      const alarmed = await env.DB.prepare(`
+        SELECT alarmed
+        FROM hosts
+        WHERE name = ?
+      `)
+        .bind(origin)
+        .first('alarmed')
+
+      await env.DB.prepare(`
+        INSERT INTO hosts(name, pinged, alarmed)
+        VALUES (?, datetime('now'), '')
+        ON CONFLICT(Name) DO UPDATE SET 
+          pinged=datetime('now'),
+          alarmed=''
+          WHERE name = ?
+      `)
+        .bind(origin, origin)
+        .run()
+
+
+      if (alarmed) {
+        await sendMessage(env, `${origin} recovered from alarm (${alarmed})`)
       }
-      await PINGS.put(origin, "", {
-        metadata: { timestamp: t.getTime(), date: t.toString() }
-      })
+
       return new Response("ok");
     }
 
     if (pathname.startsWith("/list")) {
       const accept = request.headers.get('Accept')
-      const pings = PINGS.list()
+      const { results: hosts } = await env.DB.prepare(`
+        SELECT name, pinged, alarmed
+        FROM Hosts
+      `).all()
 
       if (accept?.includes("text/html")) {
         return new Response(`
@@ -85,11 +99,11 @@ export default {
             href="https://unpkg.com/sakura.css/css/sakura.css"
             type="text/css">
           <table>
-            ${(await pings).keys.map(p => `
+            ${(hosts as Host[]).map(p => `
               <tr>
-                <td>${p.metadata.alarm ? '🛎': ' '}</td>
+                <td>${p.alarmed ? '🛎 ' + p.alarmed : ' '}</td>
                 <td>${p.name}</td>
-                <td>${p.metadata.date}</td>
+                <td>${p.pinged}</td>
               </tr>`).join('')}
           </table>
           `, {
@@ -99,32 +113,38 @@ export default {
         })
       }
 
-      return Response.json(await pings)
+      return Response.json(hosts)
     }
 
     return new Response("notok", { status: 404 })
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    const { keys: pings } = await env.PINGS.list<Metadata>()
-    const now = DateTime.fromMillis(event.scheduledTime)
+    const { results } = await env.DB.prepare(`
+        select name, pinged
+        from hosts
+        where
+          pinged < datetime('now', ?) 
+          and
+          alarmed < datetime('now', ?)
+      `)
+      .bind(env.INTERVAL, env.ALARM_TIMEOUT)
+      .all() as { results: Host[] }
 
-    const outdated = pings
-      .filter(p => isOutdated(env)(p.metadata!, now))
-      .filter(p => shouldTrigger(env)(p.metadata!, now))
-      .map(async p => {
-        console.log('trigger for', p.name)
+    if (results) {
+      const downs = results?.map(async ({ name, pinged }) => {
+        await sendMessage(env, `${name} is down, last seen: ${pinged}`)
 
-        await sendMessage(env, `${p.name} is down`)
-
-        return env.PINGS.put(p.name, "", {
-          metadata: {
-            ...p.metadata,
-            alarm: event.scheduledTime
-          }
-        })
+        return env.DB.prepare(`
+          UPDATE hosts
+          SET alarmed = datetime('now')
+          WHERE name = ?
+        `)
+          .bind(name)
+          .run()
       })
 
-    ctx.waitUntil(Promise.all(outdated))
+      ctx.waitUntil(Promise.all(downs))
+    }
   },
 };
