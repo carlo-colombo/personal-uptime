@@ -68,7 +68,7 @@ export default {
       await env.DB.prepare(`
         INSERT INTO hosts(name, pinged, alarmed)
         VALUES (?, datetime('now'), '')
-        ON CONFLICT(Name) DO UPDATE SET 
+        ON CONFLICT(Name) DO UPDATE SET
           pinged=datetime('now'),
           alarmed=''
           WHERE name = ?
@@ -98,7 +98,14 @@ export default {
             rel="stylesheet"
             href="https://unpkg.com/sakura.css/css/sakura.css"
             type="text/css">
-          <table>
+
+          <table id="table"
+                 data-now=${Date()}
+                 hx-get="/list"
+                 hx-trigger="every 5s"
+                 hx-headers='{"Accept": "text/html"}'
+                 hx-swap="outerHTML"
+                 hx-select="#table">
             ${(hosts as Host[]).map(p => `
               <tr>
                 <td>${p.alarmed ? '🛎 ' + p.alarmed : ' '}</td>
@@ -106,6 +113,11 @@ export default {
                 <td>${p.pinged}</td>
               </tr>`).join('')}
           </table>
+
+          <script src="https://unpkg.com/htmx.org@1.9.4"
+            integrity="sha384-zUfuhFKKZCbHTY6aRR46gxiqszMk5tcHjsVFxnUo8VMus4kHGVdIYVbOYYNlKmHV"
+            crossorigin="anonymous"></script>
+
           `, {
           headers: {
             'content-type': 'text/html;charset=UTF-8',
@@ -124,7 +136,7 @@ export default {
         select name, pinged
         from hosts
         where
-          pinged < datetime('now', ?) 
+          pinged < datetime('now', ?)
           and
           alarmed < datetime('now', ?)
       `)
