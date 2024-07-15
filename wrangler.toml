@@ -1,0 +1,12 @@
+name="personal-uptime"
+main="src/index.ts"
+compatibility_date = "2024-07-15"
+
+[[d1_databases]]
+binding = "DB" # i.e. available in your Worker on env.DB
+database_name = "personal-uptime"
+database_id = "859e25c3-8dee-4859-81d6-fb8ddbe989c7"
+
+[vars]
+INTERVAL="-5 minutes"
+ALARM_TIMEOUT="-1 hour"
