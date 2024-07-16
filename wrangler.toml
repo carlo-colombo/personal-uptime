@@ -9,4 +9,7 @@ database_id = "859e25c3-8dee-4859-81d6-fb8ddbe989c7"
 
 [vars]
 INTERVAL="-5 minutes"
-ALARM_TIMEOUT="-1 hour"
+ALARM_TIMEOUT="-30 minutes"
+
+[triggers]
+crons = ["*/2 * * * *"]
