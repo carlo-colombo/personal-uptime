@@ -39,7 +39,8 @@ async function sendMessage(env: Env, text: string): Promise<void> {
 interface Host {
   name: string,
   pinged: string,
-  alarmed?: string
+  alarmed?: string,
+  interval?: string
 }
 
 export default {
@@ -52,6 +53,7 @@ export default {
 
     if (pathname.startsWith("/ping")) {
       const origin = request.headers.get("Origin")
+      const interval = request.headers.get("x-interval")
 
       if (!origin) {
         return new Response("Missing origin header")
@@ -66,14 +68,14 @@ export default {
         .first('alarmed')
 
       await env.DB.prepare(`
-        INSERT INTO hosts(name, pinged, alarmed)
-        VALUES (?, datetime('now'), '')
-        ON CONFLICT(Name) DO UPDATE SET
+        INSERT INTO hosts(name, pinged, alarmed, interval)
+        VALUES (?, datetime('now'), '', ?)
+        ON CONFLICT(name) DO UPDATE SET
           pinged=datetime('now'),
-          alarmed=''
-          WHERE name = ?
+          alarmed='',
+          interval=?
       `)
-        .bind(origin, origin)
+        .bind(origin, interval, interval)
         .run()
 
 
@@ -133,12 +135,15 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     const { results } = await env.DB.prepare(`
-        select name, pinged
-        from hosts
-        where
-          pinged < datetime('now', ?)
-          and
-          alarmed < datetime('now', ?)
+        SELECT name, pinged
+        FROM hosts
+        WHERE
+            (
+                (interval IS NOT NULL AND interval != '' AND pinged < datetime('now', interval)) OR
+                ((interval IS NULL OR interval = '') AND pinged < datetime('now', ?))
+            )
+            AND
+            alarmed < datetime('now', ?)
       `)
       .bind(env.INTERVAL, env.ALARM_TIMEOUT)
       .all() as { results: Host[] }
